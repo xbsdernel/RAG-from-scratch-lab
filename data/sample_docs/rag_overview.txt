@@ -1,0 +1,126 @@
+# Retrieval-Augmented Generation (RAG): A Comprehensive Guide
+
+## Introduction
+
+Retrieval-Augmented Generation (RAG) is a framework that enhances large language models (LLMs) by connecting them to external knowledge sources. Instead of relying solely on information encoded in model weights during training, RAG allows models to retrieve relevant documents at inference time and use that context to generate more accurate, grounded, and up-to-date responses.
+
+RAG was introduced in a 2020 paper by Lewis et al. at Meta AI and has since become the dominant approach for building knowledge-intensive NLP applications.
+
+## Why RAG?
+
+Large language models have several well-known limitations:
+
+1. **Knowledge cutoff**: Models only know information from their training data. They cannot answer questions about events that occurred after their training cutoff.
+
+2. **Hallucination**: LLMs sometimes generate plausible-sounding but factually incorrect information, especially when queried about specific facts.
+
+3. **Context window limits**: LLMs cannot hold entire knowledge bases in their context window.
+
+4. **Lack of source attribution**: Pure generation models cannot cite sources for their claims.
+
+RAG addresses all four limitations by grounding generation in retrieved evidence.
+
+## The Basic RAG Pipeline
+
+A standard RAG pipeline consists of two main phases: **indexing** and **retrieval-and-generation**.
+
+### Indexing Phase
+
+1. **Document loading**: Read source documents (PDF, DOCX, TXT, web pages, databases).
+2. **Text splitting (chunking)**: Divide documents into smaller overlapping chunks. Typical chunk sizes range from 256 to 1024 characters. Overlap (e.g., 64 characters) ensures that information at chunk boundaries is not lost.
+3. **Embedding**: Convert each chunk into a dense vector using an embedding model. The embedding captures the semantic meaning of the text.
+4. **Storage**: Store the embeddings and associated metadata in a vector database (also called a vector store), such as ChromaDB, Pinecone, FAISS, or Weaviate.
+
+### Retrieval and Generation Phase
+
+1. **Query embedding**: Embed the user's question using the same embedding model.
+2. **Similarity search**: Find the top-k most similar chunks in the vector store using cosine similarity or Euclidean distance.
+3. **Context construction**: Combine the retrieved chunks into a context string.
+4. **Prompt construction**: Create a prompt that includes the user's question and the retrieved context.
+5. **Generation**: Send the prompt to the LLM to generate an answer grounded in the retrieved evidence.
+
+## Vector Similarity Search
+
+Vector similarity search is the core retrieval mechanism in RAG. After embedding both documents and queries, retrieval reduces to a nearest-neighbor search in the embedding space.
+
+**Cosine similarity** measures the angle between two vectors:
+- Values range from -1 to 1.
+- Higher values indicate more similar documents.
+
+**Euclidean (L2) distance** measures the straight-line distance:
+- Lower values indicate more similar documents.
+- ChromaDB uses L2 distance by default.
+
+**Important caveat about scores**: L2 distances returned by vector stores are NOT calibrated probability scores. A distance of 0.3 does not mean "70% confidence". They should be used for ranking, not as reliability indicators.
+
+## Text Chunking Strategies
+
+Chunking is a critical but often underappreciated step in RAG.
+
+**Fixed-size chunking**: Split text into chunks of a fixed number of characters or tokens. Simple but may split sentences mid-thought.
+
+**Recursive character splitting**: Split on paragraph boundaries first, then sentences, then words. Produces more semantically coherent chunks. This is the approach used by LangChain's `RecursiveCharacterTextSplitter`.
+
+**Semantic chunking**: Group sentences by semantic similarity. More expensive but produces higher-quality chunks.
+
+**Key parameters**:
+- `chunk_size`: Maximum characters per chunk (e.g., 512).
+- `chunk_overlap`: Characters shared between adjacent chunks (e.g., 64). Prevents information loss at boundaries.
+
+## Embedding Models
+
+Embedding models transform text into dense numerical vectors. Key considerations:
+
+- **Dimensionality**: Typical models produce 384- to 4096-dimensional vectors.
+- **Language support**: Some models only support English; multilingual models (e.g., `intfloat/multilingual-e5-small`) support many languages.
+- **Prefix conventions**: E5-family models require specific prefixes: `"query: "` for search queries and `"passage: "` for documents to be indexed.
+- **Consistency requirement**: You MUST use the same embedding model for both indexing and retrieval. Mixing models invalidates the index.
+
+## Advanced RAG Techniques
+
+### Multi-Query Retrieval
+
+Instead of retrieving based on one query formulation, generate N alternative phrasings of the question. Retrieve for each variation, then merge and deduplicate results. This compensates for the vocabulary mismatch problem: different words can mean the same thing.
+
+### RAG Fusion with Reciprocal Rank Fusion (RRF)
+
+RRF is a rank aggregation algorithm. Given multiple ranked lists of retrieved documents, RRF computes a combined score for each document:
+
+RRF_score(d) = Σ 1 / (c + rank_r(d))
+
+where c is a constant (default 60) and rank_r(d) is the document's rank in list r. Documents that appear at top positions across many queries score highest.
+
+### Query Decomposition
+
+Complex questions can be broken into simpler sub-questions:
+- **Sequential decomposition**: Answer sub-questions in order, passing previous answers as context.
+- **Parallel decomposition**: Answer sub-questions independently and simultaneously.
+
+### Step-Back Prompting
+
+Generate a more abstract "step-back" question that captures the underlying principle or concept. Retrieve for both the specific original question and the abstract step-back question. Combine both evidence sets in the final generation step.
+
+### Hypothetical Document Embeddings (HyDE)
+
+Ask the LLM to generate a hypothetical document that would answer the question. Embed this hypothetical document and use its embedding to retrieve real documents. The intuition is that a hypothetical answer lives closer in embedding space to real answers than a question does.
+
+**Critical**: The hypothetical passage is a retrieval signal only. It should NEVER be presented as real evidence.
+
+## Evaluation
+
+RAG systems are typically evaluated using:
+
+- **Recall@k**: What fraction of relevant documents are retrieved in the top k results?
+- **MRR (Mean Reciprocal Rank)**: How high does the first relevant document appear?
+- **Faithfulness**: Does the answer accurately reflect the retrieved evidence?
+- **Relevance**: Is the answer relevant to the question?
+
+Meaningful evaluation requires ground-truth labels identifying which chunks are relevant for each question.
+
+## Privacy and Security Considerations
+
+When using hosted LLMs (like Gemini, GPT-4, Claude):
+- Your prompts and retrieved document text are sent to the provider's servers.
+- For sensitive documents, consider using a locally hosted model (e.g., via Ollama).
+- API keys must be kept secret and never committed to version control.
+- Retrieved context should be sanitized to avoid leaking sensitive data.
